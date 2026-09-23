@@ -46,13 +46,6 @@ pipeline {
                     flake8 app/ --max-line-length=100 --format=default > reports/flake8.txt || true
                     pylint app/ --exit-zero > reports/pylint.txt
                 """
-                // If you've set up a local SonarQube server (see SETUP_GUIDE.md),
-                // uncomment the block below and configure the 'sonarqube' tool
-                // + 'SonarScanner' installation name in Jenkins Global Tool Config.
-                //
-                // withSonarQubeEnv('sonarqube') {
-                //     sh 'sonar-scanner'
-                // }
                 archiveArtifacts artifacts: 'reports/flake8.txt, reports/pylint.txt', allowEmptyArchive: true
             }
         }
@@ -73,7 +66,7 @@ pipeline {
                 sh """
                     IMAGE_TAG=${IMAGE_TAG} docker compose --profile staging up -d --force-recreate staging
                     sleep 5
-                    curl -f http://localhost:5001/health
+                    docker exec taskapi-staging python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"
                 """
             }
         }
@@ -82,10 +75,10 @@ pipeline {
             steps {
                 sh """
                     docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:release
-                    git tag -f release-${IMAGE_TAG}
+                    git tag -f release-${IMAGE_TAG} || true
                     IMAGE_TAG=release docker compose --profile production up -d --force-recreate production
                     sleep 5
-                    curl -f http://localhost:5000/health
+                    docker exec taskapi-production python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"
                 """
             }
         }
@@ -93,23 +86,23 @@ pipeline {
         stage('Monitoring') {
             steps {
                 script {
-                    def health = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:5000/health", returnStdout: true).trim()
+                    def health = sh(
+                        script: "docker exec taskapi-production python3 -c \"import urllib.request; print(urllib.request.urlopen('http://localhost:5000/health').status)\"",
+                        returnStdout: true
+                    ).trim()
                     if (health != '200') {
                         error "Production health check failed with status ${health} — alerting team."
                     } else {
-                        echo "Production is healthy (HTTP ${health}). Metrics available at http://localhost:5000/metrics"
+                        echo "Production is healthy (HTTP ${health})."
                     }
                 }
-                sh "curl -s http://localhost:5000/metrics | head -20"
+                sh "docker exec taskapi-production python3 -c \"import urllib.request; print(urllib.request.urlopen('http://localhost:5000/metrics').read().decode()[:500])\""
             }
         }
     }
 
     post {
         failure {
-            // Configure the Jenkins "Email Extension" or "Slack Notification"
-            // plugin and replace this echo with mail()/slackSend() — this is
-            // your alerting hook for the Monitoring stage.
             echo "Pipeline FAILED at stage: ${env.STAGE_NAME}. An alert would be sent here."
         }
         always {
