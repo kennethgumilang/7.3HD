@@ -29,7 +29,7 @@ pipeline {
                     python3 -m venv .venv
                     . .venv/bin/activate
                     pip install --quiet -r requirements-dev.txt
-                    pytest tests/ --junitxml=reports/junit.xml --cov=app --cov-report=xml:reports/coverage.xml
+                    python3 -m pytest tests/ --junitxml=reports/junit.xml --cov=app --cov-report=xml:reports/coverage.xml
                 """
             }
             post {
